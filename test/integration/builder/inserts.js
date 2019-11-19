@@ -1309,5 +1309,100 @@ module.exports = function(knex) {
           });
       });
     });
+
+    describe('#3186 ignore() and merge()', function() {
+      if (knex.client.driverName === 'sqlite3') {
+        return;
+      }
+
+      beforeEach(function() {
+        return knex.schema.dropTableIfExists('settings').then(function() {
+          return knex.schema.createTable('settings', function(table) {
+            table.increments('id');
+            table.string('key').unique();
+            table.string('value');
+          });
+        });
+      });
+
+      it.only('should ignore all columns if none specified', function() {
+        return knex.transaction(function(trx) {
+          return trx('settings')
+            .insert({ key: 'theme', value: 'light' })
+            .then(function() {
+              return trx('settings')
+                .insert({ key: 'theme', value: 'dark' })
+                .ignore();
+            })
+            .then(function() {
+              return trx('settings').where('key', 'theme').first();
+            })
+            .then(function(row) {
+              expect(row.value).to.equal('light');
+            });
+        });
+      });
+
+      it.only('should ignore only specified columns - checking against "id"', function() {
+        return knex.transaction(function(trx) {
+          return trx('settings')
+            .insert({ key: 'theme', value: 'light' })
+            .then(function() {
+              return trx('settings')
+                .insert({ key: 'theme', value: 'dark' })
+                .ignore(['id']);
+            })
+            .then(function() {
+              throw new Error('Should not reach this point');
+            })
+            .catch(function(error) {
+              expect(error.message.toLowerCase()).to.include(
+                'duplicate key value violates unique constraint "settings_key_unique"'
+              );
+            });
+        });
+      });
+
+      it.only('should ignore only specified columns - checking against "key"', function() {
+        return knex.transaction(function(trx) {
+          return trx('settings')
+            .insert({ key: 'theme', value: 'light' })
+            .then(function() {
+              return trx('settings')
+                .insert({ key: 'theme', value: 'dark' })
+                .ignore(['key']);
+            })
+            .then(function() {
+              return trx('settings').where('key', 'theme').first();
+            })
+            .then(function(row) {
+              expect(row.value).to.equal('light');
+            });
+        });
+      });
+
+      it.only('should merge columns on conflict', function() {
+        // Some driver differences:
+        //   1. postgres requires the second argument to not be empty, otherwise:
+        //      "ON CONFLICT DO UPDATE requires inference specification or constraint name"
+        //   2. mysql does not support the second argument
+        var ignoreColumns = knex.client.driverName === 'pg' ? ['key'] : [];
+        return knex.transaction(function(trx) {
+          return trx('settings')
+            .insert({ key: 'theme', value: 'light' })
+            .then(function() {
+              return trx('settings')
+                .insert({ key: 'theme', value: 'dark' })
+                .merge({ value: 'mixed' }, ignoreColumns);
+            })
+            .then(function() {
+              return trx('settings').where('key', 'theme').first();
+            })
+            .then(function(row) {
+              expect(row.value).to.equal('mixed');
+            });
+        });
+      });
+    });
   });
 };
